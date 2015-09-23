@@ -32,6 +32,7 @@ import com.friendlyarm.android.Demo.R;
 public class BluetoothTestMainActivity extends Activity {
     private static String NANOPI_BLE_SERVICE_UUID = "09fc95c0-c111-11e3-9904-0002a5d5c51b";
     private static String CHARACTERISTIC_TX_UUID = "16fe0d80-c111-11e3-b8c8-0002a5d5c51b";
+    private static String CHARACTERISTIC_RX_UUID = "11fac9e0-c111-11e3-9246-0002a5d5c51b";
     
     private static final int REQUEST_ENABLE_BT = 1;
     private static final long SCAN_PERIOD = 10000;
@@ -169,11 +170,40 @@ public class BluetoothTestMainActivity extends Activity {
                     {
                         mBluetoothGattService = gattService;
                         statusUpdate("Found communication Service");
+                        startRecvMessage();
                         sendMessage();
                     }
                 }
             } else {
                 statusUpdate("onServicesDiscovered received: " + status);
+            }
+        }
+        
+        @Override
+        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+            	statusUpdate("Write characteristic success");
+            	recvMessage();
+            } else {
+            	statusUpdate("Write characteristic failed");
+            }
+        }
+        
+        @Override
+        public void onCharacteristicRead(BluetoothGatt gatt,
+                                         BluetoothGattCharacteristic characteristic,
+                                         int status) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+            	final byte[] data = characteristic.getValue();
+            	final String str = characteristic.getStringValue(0);
+            	if (data != null && data.length > 0) {
+                	final StringBuilder stringBuilder = new StringBuilder(data.length);
+                    for(byte byteChar : data)
+                        stringBuilder.append(String.format("0x%02X ", byteChar));
+                	statusUpdate("Received Data: " + str + " (" + stringBuilder.toString() + ")");
+            	} else {
+            		statusUpdate("Received Data: no data");
+            	}
             }
         }
     };
@@ -183,21 +213,19 @@ public class BluetoothTestMainActivity extends Activity {
         if (mBluetoothGattService == null)
             return;
 
-        statusUpdate("Finding Characteristic...");
-        BluetoothGattCharacteristic gattCharacteristic =
+        statusUpdate("Finding TX Characteristic...");
+        BluetoothGattCharacteristic gattCharacteristicTX =
                 mBluetoothGattService.getCharacteristic(UUID.fromString(CHARACTERISTIC_TX_UUID));
 
-        if(gattCharacteristic == null) {
+        if(gattCharacteristicTX == null) {
             statusUpdate("Couldn't find TX characteristic: " + CHARACTERISTIC_TX_UUID);
             return;
         }
 
         statusUpdate("Found TX characteristic: " + CHARACTERISTIC_TX_UUID);
-
-        statusUpdate("Sending message 'Hello NanoPi BLE'");
-
         String msg = "Hello NanoPi BLE";
-
+        statusUpdate("Sending message: " + msg);
+        
         byte b = 0x00;
         byte[] temp = msg.getBytes();
         byte[] tx = new byte[temp.length + 1];
@@ -206,10 +234,54 @@ public class BluetoothTestMainActivity extends Activity {
         for(int i = 0; i < temp.length; i++)
             tx[i+1] = temp[i];
 
-        gattCharacteristic.setValue(tx);
-        mBluetoothGatt.writeCharacteristic(gattCharacteristic);
+        gattCharacteristicTX.setValue(tx);
+        mBluetoothGatt.writeCharacteristic(gattCharacteristicTX);
+    }
+    
+    
+    private void recvMessage ()
+    {
+        if (mBluetoothGattService == null)
+            return;
+
+        BluetoothGattCharacteristic gattCharacteristicRX =
+                mBluetoothGattService.getCharacteristic(UUID.fromString(CHARACTERISTIC_RX_UUID));
+
+        if(gattCharacteristicRX == null) {
+            statusUpdate("Couldn't find RX characteristic: " + CHARACTERISTIC_RX_UUID);
+            return;
+        }
+        boolean status = mBluetoothGatt.readCharacteristic(gattCharacteristicRX);
+        if (status) {
+        	statusUpdate("Reading process status: ok");
+        } else {
+        	statusUpdate("Reading process status: error");
+        }
     }
 
+    private void startRecvMessage ()
+    {
+        if (mBluetoothGattService == null)
+            return;
+
+        statusUpdate("Finding RX Characteristic...");
+        BluetoothGattCharacteristic gattCharacteristicRX =
+                mBluetoothGattService.getCharacteristic(UUID.fromString(CHARACTERISTIC_RX_UUID));
+
+        if(gattCharacteristicRX == null) {
+            statusUpdate("Couldn't find RX characteristic: " + CHARACTERISTIC_RX_UUID);
+            return;
+        }
+        statusUpdate("Found RX characteristic: " + CHARACTERISTIC_RX_UUID);
+        
+        if ((gattCharacteristicRX.getProperties() & BluetoothGattCharacteristic.PROPERTY_READ) == 0) {
+            statusUpdate("The RX characteristic cannot be read");
+            return;
+        }
+        
+        mBluetoothGatt.setCharacteristicNotification(gattCharacteristicRX, true);
+    }
+    
     private void scanLeDevice() {
         new Thread() {
 
